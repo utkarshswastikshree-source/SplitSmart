@@ -93,12 +93,23 @@ export default function SplittingPage() {
     setConfirmationOpen(true);
   };
 
-  const handleRecordExpense = () => {
+  const handleRecordExpense = async () => {
+    if (isSubmitting) return;
+
+    if (finalShares.length === 0) {
+      addToast({
+        type: 'error',
+        title: 'No Split Available',
+        message: 'Please calculate the member shares before saving.',
+      });
+      return;
+    }
+
     setIsSubmitting(true);
 
-    setTimeout(() => {
-      addExpense({
-        title: `${receiptData.merchant}`,
+    try {
+      await addExpense({
+        title: receiptData.merchant,
         amount: receiptData.grandTotal,
         category: 'Food & Dining',
         paidById: currentUser.id,
@@ -107,13 +118,17 @@ export default function SplittingPage() {
           memberId: s.id,
           amount: s.totalShare,
         })),
-        notes: `AI itemized bill split with taxes & service charges allocated proportionally.`,
+        notes: 'AI itemized bill split with taxes & service charges allocated proportionally.',
       });
 
-      setIsSubmitting(false);
       setConfirmationOpen(false);
       navigate('/settlement');
-    }, 700);
+
+    } catch (error) {
+      console.error('Failed to record split:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (

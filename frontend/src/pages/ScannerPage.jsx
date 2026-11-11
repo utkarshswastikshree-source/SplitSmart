@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { scanReceiptWithGemini } from '../services/geminiService';
+import { scanReceiptAPI } from '../services/apiService';
 import ReceiptDropzone from '../components/receipt/ReceiptDropzone';
 import ExtractedItemsTable from '../components/receipt/ExtractedItemsTable';
 import LoadingSpinner from '../components/common/LoadingSpinner';
@@ -16,33 +16,91 @@ export default function ScannerPage() {
   const [scanProgress, setScanProgress] = useState(null);
   const [extractedReceipt, setExtractedReceipt] = useState(null);
   const [error, setError] = useState(null);
-
   const handleSelectReceipt = async (fileOrSampleId) => {
     setIsScanning(true);
     setError(null);
-    setScanProgress({ step: 1, message: 'Initiating Gemini Vision OCR...', percent: 15 });
 
     try {
-      const result = await scanReceiptWithGemini(fileOrSampleId, (progress) => {
-        setScanProgress(progress);
-      });
+      let result;
+
+      if (fileOrSampleId instanceof File) {
+        setScanProgress({
+          step: 1,
+          message: 'Uploading receipt to AI...',
+          percent: 30,
+        });
+
+        const aiData = await scanReceiptAPI(fileOrSampleId);
+
+        setScanProgress({
+          step: 2,
+          message: 'Processing extracted receipt data...',
+          percent: 80,
+        });
+
+        const items = aiData.items.map((item, index) => ({
+          id: `ai-item-${index}`,
+          name: item.name,
+          qty: Number(item.quantity),
+          price: Number(item.unit_price),
+          amount: Number(item.total_price),
+          assignedMemberIds: [],
+        }));
+
+        const subtotal = items.reduce(
+          (sum, item) => sum + item.amount,
+          0
+        );
+
+        const grandTotal = Number(aiData.total);
+        const taxAmount = Number(aiData.tax || 0);
+        const taxRate = subtotal > 0 ? taxAmount / subtotal : 0;
+        result = {
+          id: `ai-scan-${Date.now()}`,
+          merchant: aiData.merchant,
+          currency: aiData.currency,
+          items,
+          subtotal,
+          taxAmount,
+          taxRate,
+          serviceCharge: 0,
+          grandTotal,
+          date: new Date().toISOString().split('T')[0],
+          category: 'Food & Dining',
+        };
+      } else {
+        // Preserve existing sample receipt functionality
+        const { SAMPLE_RECEIPTS } = await import('../services/mockData');
+        result = SAMPLE_RECEIPTS.find(
+          (sample) => sample.id === fileOrSampleId
+        );
+
+        if (!result) {
+          throw new Error('Sample receipt not found.');
+        }
+      }
 
       setExtractedReceipt(result);
+
       addToast({
         type: 'success',
         title: 'Receipt Extracted',
-        message: `Extracted ${result.items.length} line items from ${result.merchant}.`,
+        message: `Extracted ${result.items.length} items from ${result.merchant}.`,
       });
+
     } catch (err) {
-      console.error(err);
-      setError('Failed to extract receipt. Please try another image.');
+      console.error('Receipt scanning failed:', err);
+      setError(err.message || 'Failed to extract receipt. Please try another image.');
+
       addToast({
         type: 'error',
         title: 'Scan Failed',
-        message: 'Could not parse the receipt image.',
+        message: err.message || 'Could not parse the receipt image.',
       });
+
     } finally {
       setIsScanning(false);
+      setScanProgress(null);
     }
   };
 
@@ -65,7 +123,7 @@ export default function ScannerPage() {
         <div>
           <div className="flex items-center gap-2">
             <Badge variant="brand" size="sm">
-              Gemini 1.5 Vision OCR
+              SplitSmart AI Receipt Scanner
             </Badge>
             <span className="text-xs text-slate-400">
               Active Group: {currentGroup?.name || 'Goa Trip 2024'}
@@ -102,7 +160,7 @@ export default function ScannerPage() {
               {scanProgress.message}
             </h3>
             <p className="text-xs text-slate-500 mt-1">
-              Gemini Vision is parsing dishes, prices, quantities, and GST rates...
+              SplitSmart AI will automatically detect items, taxes, and totals.
             </p>
           </div>
 

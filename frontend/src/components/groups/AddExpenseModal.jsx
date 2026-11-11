@@ -39,35 +39,46 @@ export default function AddExpenseModal({ isOpen, onClose }) {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!title || !amount || Number(amount) <= 0) return;
+
+    if (loading) return;
+
+    if (!title.trim() || !amount || Number(amount) <= 0 || splitWith.length === 0) {
+      return;
+    }
 
     setLoading(true);
 
-    const numericAmount = parseFloat(amount);
-    const perPerson = numericAmount / splitWith.length;
+    try {
+      const numericAmount = parseFloat(amount);
+      const perPerson = numericAmount / splitWith.length;
 
-    const shares = splitWith.map((mId) => ({
-      memberId: mId,
-      amount: perPerson,
-    }));
+      const shares = splitWith.map((mId) => ({
+        memberId: mId,
+        amount: perPerson,
+      }));
 
-    addExpense({
-      title,
-      amount: numericAmount,
-      category,
-      paidById,
-      splitType: splitWith.length === members.length ? 'Equal Split' : 'Custom Split',
-      shares,
-      notes,
-    });
+      await addExpense({
+        title,
+        amount: numericAmount,
+        category,
+        paidById,
+        splitType: splitWith.length === members.length ? 'Equal Split' : 'Custom Split',
+        shares,
+        notes,
+      });
 
-    setLoading(false);
-    setTitle('');
-    setAmount('');
-    setNotes('');
-    onClose();
+      setTitle('');
+      setAmount('');
+      setNotes('');
+      onClose();
+
+    } catch (error) {
+      console.error('Failed to save expense:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -129,11 +140,10 @@ export default function AddExpenseModal({ isOpen, onClose }) {
                   key={m.id}
                   type="button"
                   onClick={() => setPaidById(m.id)}
-                  className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${
-                    isSelected
-                      ? 'border-brand-500 bg-brand-50/60 ring-1 ring-brand-500'
-                      : 'border-slate-200 hover:border-slate-300 bg-white'
-                  }`}
+                  className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${isSelected
+                    ? 'border-brand-500 bg-brand-50/60 ring-1 ring-brand-500'
+                    : 'border-slate-200 hover:border-slate-300 bg-white'
+                    }`}
                 >
                   <Avatar src={m.avatar} name={m.name} size="xs" />
                   <span className="text-xs font-semibold text-navy-900 truncate">
@@ -167,11 +177,10 @@ export default function AddExpenseModal({ isOpen, onClose }) {
                   key={m.id}
                   type="button"
                   onClick={() => toggleMember(m.id)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium transition-all ${
-                    isChecked
-                      ? 'bg-brand-600 text-white border-brand-600 shadow-xs'
-                      : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
-                  }`}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium transition-all ${isChecked
+                    ? 'bg-brand-600 text-white border-brand-600 shadow-xs'
+                    : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                    }`}
                 >
                   <span>{m.name}</span>
                 </button>
@@ -188,7 +197,7 @@ export default function AddExpenseModal({ isOpen, onClose }) {
         />
 
         <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" type="button" onClick={onClose}>
             Cancel
           </Button>
           <Button variant="primary" type="submit" loading={loading} icon={Plus}>

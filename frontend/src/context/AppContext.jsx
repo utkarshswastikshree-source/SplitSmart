@@ -7,7 +7,7 @@ import {
   SAMPLE_RECEIPTS,
 } from '../services/mockData';
 import confetti from 'canvas-confetti';
-
+import { createGroupAPI, addExpenseAPI, BACKEND_USER_IDS } from '../services/apiService';
 const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
@@ -60,60 +60,107 @@ How can I help you today?`,
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Add an expense to current group
-  const addExpense = (newExpenseData) => {
-    const id = `exp-${Date.now()}`;
-    const newExpense = {
-      id,
-      groupId: currentGroupId,
-      date: new Date().toISOString(),
-      status: 'Pending Settlement',
-      ...newExpenseData,
-    };
+  // Add an expense using the live backend
+  const addExpense = async (newExpenseData) => {
+    try {
+      const paidBy = BACKEND_USER_IDS[newExpenseData.paidById];
 
-    setExpenses((prev) => [newExpense, ...prev]);
+      if (!paidBy) {
+        throw new Error('Invalid payer ID.');
+      }
 
-    // Update group total
-    setGroups((prev) =>
-      prev.map((g) =>
-        g.id === currentGroupId
-          ? { ...g, totalExpenses: g.totalExpenses + Number(newExpense.amount) }
-          : g
-      )
-    );
+      const splits = newExpenseData.shares.map((share) => {
+        const userId = BACKEND_USER_IDS[share.memberId];
 
-    addToast({
-      type: 'success',
-      title: 'Expense Added',
-      message: `"${newExpense.title}" added to ${currentGroup.name}.`,
-    });
+        if (!userId) {
+          throw new Error(`Invalid member ID: ${share.memberId}`);
+        }
 
-    return newExpense;
+        return {
+          userId,
+          amountOwed: Number(share.amount),
+        };
+      });
+
+      const response = await addExpenseAPI({
+        groupId: currentGroupId,
+        paidBy,
+        totalAmount: Number(newExpenseData.amount),
+        receiptUrl: null,
+        splits,
+      });
+
+      const newExpense = {
+        id: response.expense.id,
+        groupId: currentGroupId,
+        date: response.expense.created_at,
+        status: 'Pending Settlement',
+        ...newExpenseData,
+      };
+
+      setExpenses((prev) => [newExpense, ...prev]);
+
+      setGroups((prev) =>
+        prev.map((g) =>
+          g.id === currentGroupId
+            ? { ...g, totalExpenses: g.totalExpenses + Number(newExpense.amount) }
+            : g
+        )
+      );
+
+      addToast({
+        type: 'success',
+        title: 'Expense Added',
+        message: `"${newExpense.title}" added to ${currentGroup.name}.`,
+      });
+
+      return newExpense;
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: 'Expense Failed',
+        message: error.message,
+      });
+
+      throw error;
+    }
   };
 
-  // Create a new group
-  const createGroup = (groupData) => {
-    const newGroup = {
-      id: `group-${Date.now()}`,
-      createdAt: new Date().toISOString(),
-      totalExpenses: 0,
-      userNetBalance: 0,
-      currency: currency,
-      currencySymbol: currency === 'INR' ? '₹' : '$',
-      coverImage: 'https://images.unsplash.com/photo-1530521954074-e64f6810b32d?w=800&auto=format&fit=crop&q=80',
-      ...groupData,
-    };
+  // Create a group using the live backend
+  const createGroup = async (groupData) => {
+    try {
+      const response = await createGroupAPI(groupData.name);
 
-    setGroups((prev) => [newGroup, ...prev]);
-    setCurrentGroupId(newGroup.id);
+      const newGroup = {
+        createdAt: response.group.created_at,
+        totalExpenses: 0,
+        userNetBalance: 0,
+        currency: currency,
+        currencySymbol: currency === 'INR' ? '₹' : '$',
+        coverImage: 'https://images.unsplash.com/photo-1530521954074-e64f6810b32d?w=800&auto=format&fit=crop&q=80',
+        ...groupData,
+        id: response.group.id,
+      };
 
-    addToast({
-      type: 'success',
-      title: 'Group Created',
-      message: `"${newGroup.name}" is ready for expense splitting.`,
-    });
+      setGroups((prev) => [newGroup, ...prev]);
+      setCurrentGroupId(newGroup.id);
 
-    return newGroup;
+      addToast({
+        type: 'success',
+        title: 'Group Created',
+        message: `"${newGroup.name}" created successfully.`,
+      });
+
+      return newGroup;
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: 'Group Creation Failed',
+        message: error.message,
+      });
+
+      throw error;
+    }
   };
 
   // Settle a debt
@@ -180,7 +227,7 @@ How can I help you today?`,
       message: `Settled ${currency === 'INR' ? '₹' : '$'}${amount} via ${paymentMethod}!`,
     });
 
-    return newSettlement;
+    return settlementRecord;
   };
 
   // Add AI message to conversation
@@ -199,7 +246,7 @@ How can I help you today?`,
   const calculateGroupBalances = (groupId = currentGroupId) => {
     const groupExpenses = expenses.filter((e) => e.groupId === groupId);
     const groupMembers = currentGroup?.members || [];
-    
+
     // Net balance per member: { memberId: balance }
     // Positive means member is owed money; Negative means member owes money
     const balances = {};

@@ -122,7 +122,7 @@ export default function ExtractedItemsTable({
                 </span>
                 <span className="text-slate-300">•</span>
                 <Badge variant="brand" size="sm">
-                  Gemini Vision 98% Confidence
+                  AI Receipt Extraction
                 </Badge>
                 {extractedData.image && (
                   <button
