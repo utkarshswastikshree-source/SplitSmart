@@ -14,7 +14,7 @@ app.get('/', (req, res) => {
     res.send("SplitSmart Backend is running! 🚀");
 });
 
-// 2. Group Create Karne Ka API (With Smart Bypass)
+// 2. Create Group API
 app.post('/api/create-group', async (req, res) => {
     try {
         const { groupName, userId } = req.body;
@@ -23,93 +23,147 @@ app.post('/api/create-group', async (req, res) => {
             return res.status(400).json({ error: "Group name zaroori hai!" });
         }
 
-        // Database mein save karne ki koshish karo
         const { data, error } = await supabase
             .from('groups')
             .insert([{ name: groupName, created_by: userId || "123e4567-e89b-12d3-a456-426614174000" }])
             .select(); 
 
-        // Agar internet/database ka error aaye, toh usko ignore karke success bhej do
         if (error) {
-            console.log("⚠️ Database Error (Bypassing for now):", error.message);
+            console.log("⚠️ Database Error:", error.message);
+            // Fallback (just in case)
             return res.status(201).json({ 
-                message: "Group successfully ban gaya (Offline Mode)! 🎉", 
+                message: "Group created (Offline Mode)! 🎉", 
                 group: { id: "dummy-id-123", name: groupName } 
             });
         }
 
-        // Agar database mein save ho gaya
         res.status(201).json({ 
-            message: "Group successfully ban gaya! 🎉", 
+            message: "Group successfully created! 🎉", 
             group: data[0] 
         });
 
     } catch (error) {
-        console.log("⚠️ Server Error (Bypassing):", error.message);
-        res.status(201).json({ 
-            message: "Group successfully ban gaya (Catch Mode)! 🎉", 
-            group: { id: "dummy-id-456", name: req.body.groupName } 
-        });
+        res.status(500).json({ error: "Server error" });
     }
 });
 
-// 3. Server Start
-const PORT = process.env.PORT || 5000;
-// Add Expense API
+// 3. Add Expense API (Updated with Multiple Payers & Validation)
 app.post('/api/add-expense', async (req, res) => {
     try {
-        const { groupId, paidBy, totalAmount, receiptUrl, splits } = req.body;
+        const { groupId, uploadedBy, totalAmount, receiptUrl, contributions, splits } = req.body;
 
-        if (!groupId || !paidBy || !totalAmount) {
-            return res.status(400).json({ error: "Group ID, PaidBy aur Amount zaroori hai!" });
+        if (!groupId || !totalAmount) {
+            return res.status(400).json({ error: "Group ID aur Amount zaroori hai!" });
         }
 
-        // Database mein save karne ki koshish karo
-        const { data, error } = await supabase
+        // Validation 1: Contributions
+        if (contributions && contributions.length > 0) {
+            const totalContributed = contributions.reduce((sum, c) => sum + Number(c.amountPaid), 0);
+            if (Math.abs(totalContributed - totalAmount) > 0.01) { 
+                return res.status(400).json({ error: `Contributions total (${totalContributed}) does not match bill amount (${totalAmount})!` });
+            }
+        }
+
+        // Validation 2: Splits
+        if (splits && splits.length > 0) {
+            const totalSplit = splits.reduce((sum, s) => sum + Number(s.amountOwed), 0);
+            if (Math.abs(totalSplit - totalAmount) > 0.01) {
+                return res.status(400).json({ error: `Splits total (${totalSplit}) does not match bill amount (${totalAmount})!` });
+            }
+        }
+
+        // Save Main Expense
+        const { data: expenseData, error: expenseError } = await supabase
             .from('expenses')
             .insert([{ 
                 group_id: groupId, 
-                paid_by: paidBy, 
+                paid_by: uploadedBy || "unknown", 
                 total_amount: totalAmount,
                 receipt_url: receiptUrl || null
             }])
             .select();
 
-        // Agar Database fail hota hai
-        if (error) {
-            console.log("⚠️ DB Error (Bypassing Expense):", error.message);
-            return res.status(201).json({ 
-                message: "Expense saved (Offline Mode)! 🎉", 
-                expense: { id: "dummy-expense-123", ...req.body } 
-            });
-        }
+        if (expenseError) throw expenseError;
+        const expenseId = expenseData[0].id;
 
-        // Agar expense save ho gaya, toh splits save karo
-        const expenseId = data[0].id;
-        
-        if (splits && splits.length > 0) {
-            const splitData = splits.map(split => ({
-                expense_id: expenseId,
-                user_id: split.userId,
-                amount_owed: split.amountOwed
-            }));
-            
-            await supabase.from('expense_splits').insert(splitData);
+        try {
+            // Save Contributions (TRANSFER_IN)
+            if (contributions && contributions.length > 0) {
+                const contribData = contributions.map(c => ({
+                    expense_id: expenseId,
+                    user_id: c.userId,
+                    amount_owed: c.amountPaid,
+                    is_settled: true 
+                }));
+                await supabase.from('expense_splits').insert(contribData);
+            }
+
+            // Save Splits (TRANSFER_OUT)
+            if (splits && splits.length > 0) {
+                const splitData = splits.map(s => ({
+                    expense_id: expenseId,
+                    user_id: s.userId,
+                    amount_owed: s.amountOwed,
+                    is_settled: false 
+                }));
+                await supabase.from('expense_splits').insert(splitData);
+            }
+        } catch (splitError) {
+            // Rollback if splits fail
+            await supabase.from('expenses').delete().eq('id', expenseId);
+            throw splitError;
         }
 
         res.status(201).json({ 
-            message: "Expense successfully save ho gaya! 🎉", 
-            expense: data[0] 
+            message: "Expense saved perfectly! 🎉", 
+            expense: expenseData[0] 
         });
 
     } catch (err) {
-        console.log("⚠️ Server Error (Bypassing Expense):", err.message);
-        res.status(201).json({ 
-            message: "Expense saved (Catch Mode)! 🎉", 
-            expense: { id: "dummy-expense-456", ...req.body } 
-        });
+        console.log("⚠️ Error:", err.message);
+        res.status(500).json({ error: "Server error", details: err.message });
     }
 });
+
+// 4. Get Balances API (For Dashboard)
+app.get('/api/get-balances/:groupId', async (req, res) => {
+    try {
+        const { groupId } = req.params;
+
+        const { data, error } = await supabase
+            .from('expense_splits')
+            .select(`
+                user_id,
+                amount_owed,
+                is_settled,
+                expenses!inner(group_id)
+            `)
+            .eq('expenses.group_id', groupId);
+
+        if (error) throw error;
+
+        // Calculate net balance: 
+        // Positive = they are owed money
+        // Negative = they owe money
+        const balances = {};
+        data.forEach(item => {
+            if (!balances[item.user_id]) balances[item.user_id] = 0;
+            
+            if (item.is_settled) {
+                balances[item.user_id] += Number(item.amount_owed); // They paid
+            } else {
+                balances[item.user_id] -= Number(item.amount_owed); // They owe
+            }
+        });
+
+        res.status(200).json({ groupId, balances });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 5. Server Start (Always at the very bottom!)
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
