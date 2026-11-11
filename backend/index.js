@@ -1,7 +1,11 @@
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
+const https = require('https'); // NAYA: IPv4 fix ke liye
+const dns = require('dns');     // NAYA: IPv4 fix ke liye
 require('dotenv').config({ override: true });
+
+dns.setDefaultResultOrder('ipv4first'); // NAYA: Force IPv4
 
 const app = express();
 app.use(cors());
@@ -9,7 +13,16 @@ app.use(express.json());
 
 const supabaseUrl = process.env.SUPABASE_URL || "https://zupdmssmzhjlwvemkpa.supabase.co";
 const supabaseKey = process.env.SUPABASE_KEY || "YAHAN_APNI_SECRET_KEY_PASTE_KARO";
-const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Supabase connect with custom agent
+const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: { persistSession: false },
+  global: { 
+    fetch: (url, options) => {
+      return fetch(url, { ...options, agent: new https.Agent({ keepAlive: true }) });
+    }
+  }
+});
 
 // 1. Test Route
 app.get('/', (req, res) => {
@@ -32,7 +45,6 @@ app.post('/api/create-group', async (req, res) => {
 
         if (error) {
             console.log("⚠️ Database Error:", error.message);
-            // Fallback (just in case)
             return res.status(201).json({ 
                 message: "Group created (Offline Mode)! 🎉", 
                 group: { id: "dummy-id-123", name: groupName } 
@@ -49,7 +61,7 @@ app.post('/api/create-group', async (req, res) => {
     }
 });
 
-// 3. Add Expense API (Updated with Multiple Payers & Validation)
+// 3. Add Expense API
 app.post('/api/add-expense', async (req, res) => {
     try {
         const { groupId, uploadedBy, totalAmount, receiptUrl, contributions, splits } = req.body;
@@ -58,7 +70,6 @@ app.post('/api/add-expense', async (req, res) => {
             return res.status(400).json({ error: "Group ID aur Amount zaroori hai!" });
         }
 
-        // Validation 1: Contributions
         if (contributions && contributions.length > 0) {
             const totalContributed = contributions.reduce((sum, c) => sum + Number(c.amountPaid), 0);
             if (Math.abs(totalContributed - totalAmount) > 0.01) { 
@@ -66,7 +77,6 @@ app.post('/api/add-expense', async (req, res) => {
             }
         }
 
-        // Validation 2: Splits
         if (splits && splits.length > 0) {
             const totalSplit = splits.reduce((sum, s) => sum + Number(s.amountOwed), 0);
             if (Math.abs(totalSplit - totalAmount) > 0.01) {
@@ -74,7 +84,6 @@ app.post('/api/add-expense', async (req, res) => {
             }
         }
 
-        // Save Main Expense
         const { data: expenseData, error: expenseError } = await supabase
             .from('expenses')
             .insert([{ 
@@ -89,7 +98,6 @@ app.post('/api/add-expense', async (req, res) => {
         const expenseId = expenseData[0].id;
 
         try {
-            // Save Contributions (TRANSFER_IN)
             if (contributions && contributions.length > 0) {
                 const contribData = contributions.map(c => ({
                     expense_id: expenseId,
@@ -100,7 +108,6 @@ app.post('/api/add-expense', async (req, res) => {
                 await supabase.from('expense_splits').insert(contribData);
             }
 
-            // Save Splits (TRANSFER_OUT)
             if (splits && splits.length > 0) {
                 const splitData = splits.map(s => ({
                     expense_id: expenseId,
@@ -111,7 +118,6 @@ app.post('/api/add-expense', async (req, res) => {
                 await supabase.from('expense_splits').insert(splitData);
             }
         } catch (splitError) {
-            // Rollback if splits fail
             await supabase.from('expenses').delete().eq('id', expenseId);
             throw splitError;
         }
@@ -127,7 +133,7 @@ app.post('/api/add-expense', async (req, res) => {
     }
 });
 
-// 4. Get Balances API (For Dashboard)
+// 4. Get Balances API
 app.get('/api/get-balances/:groupId', async (req, res) => {
     try {
         const { groupId } = req.params;
@@ -144,17 +150,14 @@ app.get('/api/get-balances/:groupId', async (req, res) => {
 
         if (error) throw error;
 
-        // Calculate net balance: 
-        // Positive = they are owed money
-        // Negative = they owe money
         const balances = {};
         data.forEach(item => {
             if (!balances[item.user_id]) balances[item.user_id] = 0;
             
             if (item.is_settled) {
-                balances[item.user_id] += Number(item.amount_owed); // They paid
+                balances[item.user_id] += Number(item.amount_owed);
             } else {
-                balances[item.user_id] -= Number(item.amount_owed); // They owe
+                balances[item.user_id] -= Number(item.amount_owed);
             }
         });
 
@@ -164,7 +167,7 @@ app.get('/api/get-balances/:groupId', async (req, res) => {
     }
 });
 
-// 5. Server Start (Always at the very bottom!)
+// 5. Server Start
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
