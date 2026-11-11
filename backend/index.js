@@ -1,13 +1,15 @@
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
-require('dotenv').config(); 
+require('dotenv').config({ override: true });
 
 const app = express();
 app.use(cors());
 app.use(express.json()); 
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const supabaseUrl = process.env.SUPABASE_URL || "https://zupdmssmzhjlwvemkpa.supabase.co";
+const supabaseKey = process.env.SUPABASE_KEY || "YAHAN_APNI_SECRET_KEY_PASTE_KARO";
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // 1. Test Route
 app.get('/', (req, res) => {
