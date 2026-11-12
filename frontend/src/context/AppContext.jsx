@@ -1,34 +1,58 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+} from 'react';
+
 import {
   CURRENT_USER,
-  INITIAL_GROUPS,
+  GROUP_MEMBERS,
   INITIAL_EXPENSES,
   INITIAL_SETTLEMENTS,
-  SAMPLE_RECEIPTS,
 } from '../services/mockData';
+
 import confetti from 'canvas-confetti';
-import { createGroupAPI, addExpenseAPI, BACKEND_USER_IDS } from '../services/apiService';
+
+import {
+  createGroupAPI,
+  addExpenseAPI,
+  getGroupsAPI,
+  getGroupMembersAPI,
+  createSettlementAPI,
+  createPayPalOrderAPI,
+  BACKEND_USER_IDS,
+} from '../services/apiService';
+
 const AppContext = createContext(null);
+
+const isValidUUID = (id) =>
+  typeof id === 'string' &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
 export function AppProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(CURRENT_USER);
-  const [groups, setGroups] = useState(INITIAL_GROUPS);
-  const [currentGroupId, setCurrentGroupId] = useState(INITIAL_GROUPS[0].id);
+  const [groups, setGroups] = useState([]);
+
+  const [currentGroupId, setCurrentGroupId] = useState(
+    () => localStorage.getItem('splitsmart_current_group') || null
+  );
+
+  const [groupsLoading, setGroupsLoading] = useState(true);
+
   const [expenses, setExpenses] = useState(INITIAL_EXPENSES);
   const [settlements, setSettlements] = useState(INITIAL_SETTLEMENTS);
   const [currency, setCurrency] = useState('INR');
   const [toasts, setToasts] = useState([]);
 
-  // Active scan state: carries extracted receipt from /scan into /split
   const [activeScan, setActiveScan] = useState(null);
 
-  // AI chat messages
   const [aiChatHistory, setAiChatHistory] = useState([
     {
       id: 'msg-init',
       sender: 'ai',
       text: `Hello Rahul! I'm **SplitSmart AI**, your personal expense assistant.
-      
+
 I've loaded the ledger for **Goa Trip 2024**. You can ask me questions like:
 - *"Who owes me the most?"*
 - *"How much did we spend on food?"*
@@ -40,19 +64,25 @@ How can I help you today?`,
     },
   ]);
 
-  const currentGroup = groups.find((g) => g.id === currentGroupId) || groups[0];
-
   // Toast notification manager
-  const addToast = ({ type = 'info', title, message, duration = 4000 }) => {
-    const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+  const addToast = ({
+    type = 'info',
+    title,
+    message,
+    duration = 4000,
+  }) => {
+    const id = `toast-${Date.now()}-${Math.random()
+      .toString(36)
+      .substr(2, 4)}`;
+
     const newToast = { id, type, title, message };
+
     setToasts((prev) => [...prev, newToast]);
 
     if (duration > 0) {
-      setTimeout(() => {
-        removeToast(id);
-      }, duration);
+      setTimeout(() => removeToast(id), duration);
     }
+
     return id;
   };
 
@@ -60,73 +90,124 @@ How can I help you today?`,
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Add an expense using the live backend
-  const addExpense = async (newExpenseData) => {
-    try {
-      const paidBy = BACKEND_USER_IDS[newExpenseData.paidById];
+  // Fetch groups and members from backend
+  useEffect(() => {
+    let cancelled = false;
 
-      if (!paidBy) {
-        throw new Error('Invalid payer ID.');
-      }
+    const fetchGroups = async () => {
+      try {
+        setGroupsLoading(true);
 
-      const splits = newExpenseData.shares.map((share) => {
-        const userId = BACKEND_USER_IDS[share.memberId];
+        const backendUserId =
+          BACKEND_USER_IDS[currentUser.id] ||
+          (isValidUUID(currentUser.id) ? currentUser.id : null);
 
-        if (!userId) {
-          throw new Error(`Invalid member ID: ${share.memberId}`);
+        if (!backendUserId) {
+          throw new Error('Invalid current user ID.');
         }
 
-        return {
-          userId,
-          amountOwed: Number(share.amount),
-        };
-      });
+        const response = await getGroupsAPI(backendUserId);
 
-      const response = await addExpenseAPI({
-        groupId: currentGroupId,
-        paidBy,
-        totalAmount: Number(newExpenseData.amount),
-        receiptUrl: null,
-        splits,
-      });
+        const profileMap = Object.fromEntries(
+          GROUP_MEMBERS.map((member) => [
+            BACKEND_USER_IDS[member.id],
+            member,
+          ])
+        );
 
-      const newExpense = {
-        id: response.expense.id,
-        groupId: currentGroupId,
-        date: response.expense.created_at,
-        status: 'Pending Settlement',
-        ...newExpenseData,
-      };
+        const mappedGroups = await Promise.all(
+          (response.groups || []).map(async (group) => {
+            let members = [];
 
-      setExpenses((prev) => [newExpense, ...prev]);
+            try {
+              const memberResponse = await getGroupMembersAPI(group.id);
 
-      setGroups((prev) =>
-        prev.map((g) =>
-          g.id === currentGroupId
-            ? { ...g, totalExpenses: g.totalExpenses + Number(newExpense.amount) }
-            : g
-        )
+              members = (memberResponse.members || []).map((member) => {
+                const profile = profileMap[member.userId];
+
+                return {
+                  ...(profile || {}),
+                  id: profile?.id || member.userId,
+                  role: member.role,
+                };
+              });
+            } catch (error) {
+              console.error(
+                `Failed to fetch members for ${group.id}:`,
+                error
+              );
+            }
+
+            return {
+              id: group.id,
+              name: group.name,
+              description: group.description || '',
+              category: group.category || 'Group',
+              currency: 'INR',
+              currencySymbol: '₹',
+              coverImage: null,
+              createdAt: group.created_at || null,
+              created_by: group.created_by,
+              members,
+              totalExpenses: 0,
+              userNetBalance: 0,
+            };
+          })
+        );
+
+        if (cancelled) return;
+
+        setGroups(mappedGroups);
+
+        setCurrentGroupId((previousId) => {
+          const savedId =
+            previousId ||
+            localStorage.getItem('splitsmart_current_group');
+
+          return mappedGroups.some((group) => group.id === savedId)
+            ? savedId
+            : mappedGroups[0]?.id || null;
+        });
+      } catch (error) {
+        console.error('Failed to fetch groups:', error);
+
+        if (!cancelled) {
+          addToast({
+            type: 'error',
+            title: 'Groups Loading Failed',
+            message: error.message,
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setGroupsLoading(false);
+        }
+      }
+    };
+
+    fetchGroups();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser.id]);
+
+  // Save selected group ID
+  useEffect(() => {
+    if (isValidUUID(currentGroupId)) {
+      localStorage.setItem(
+        'splitsmart_current_group',
+        currentGroupId
       );
-
-      addToast({
-        type: 'success',
-        title: 'Expense Added',
-        message: `"${newExpense.title}" added to ${currentGroup.name}.`,
-      });
-
-      return newExpense;
-    } catch (error) {
-      addToast({
-        type: 'error',
-        title: 'Expense Failed',
-        message: error.message,
-      });
-
-      throw error;
+    } else {
+      localStorage.removeItem('splitsmart_current_group');
     }
-  };
+  }, [currentGroupId]);
 
-  // Create a group using the live backend
+  const currentGroup =
+    groups.find((g) => g.id === currentGroupId) || groups[0];
+
+  // Create group using backend
   const createGroup = async (groupData) => {
     try {
       const response = await createGroupAPI(groupData.name);
@@ -135,9 +216,10 @@ How can I help you today?`,
         createdAt: response.group.created_at,
         totalExpenses: 0,
         userNetBalance: 0,
-        currency: currency,
+        currency,
         currencySymbol: currency === 'INR' ? '₹' : '$',
-        coverImage: 'https://images.unsplash.com/photo-1530521954074-e64f6810b32d?w=800&auto=format&fit=crop&q=80',
+        coverImage:
+          'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4',
         ...groupData,
         id: response.group.id,
       };
@@ -148,7 +230,7 @@ How can I help you today?`,
       addToast({
         type: 'success',
         title: 'Group Created',
-        message: `"${newGroup.name}" created successfully.`,
+        message: `${newGroup.name} created successfully.`,
       });
 
       return newGroup;
@@ -163,9 +245,267 @@ How can I help you today?`,
     }
   };
 
-  // Settle a debt
-  const settleDebt = ({ fromUserId, toUserId, amount, paymentMethod = 'PayPal', note = '' }) => {
-    const txnId = `PAYID-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+  // Add expense using backend
+  const addExpense = async (newExpenseData) => {
+    try {
+      if (!isValidUUID(currentGroupId)) {
+        throw new Error(
+          'Please create or select a backend-created group before adding expenses.'
+        );
+      }
+
+      const uploadedBy =
+        BACKEND_USER_IDS[currentUser.id] ||
+        (isValidUUID(currentUser.id) ? currentUser.id : null);
+
+      if (!uploadedBy) {
+        throw new Error('Invalid uploader ID.');
+      }
+
+      if (!newExpenseData.receiptData) {
+        throw new Error('Original receipt data is missing.');
+      }
+
+      const contributions = newExpenseData.contributions.map((member) => {
+        const userId =
+          BACKEND_USER_IDS[member.memberId] ||
+          (isValidUUID(member.memberId) ? member.memberId : null);
+
+        const amountPaid = Number(member.amountPaid);
+
+        if (!userId) {
+          throw new Error(
+            `Invalid contributor ID: ${member.memberId}`
+          );
+        }
+
+        if (!Number.isFinite(amountPaid) || amountPaid < 0) {
+          throw new Error(
+            `Invalid contribution amount for ${member.memberId}`
+          );
+        }
+
+        return {
+          userId,
+          amountPaid,
+        };
+      });
+
+      const itemAssignments = newExpenseData.itemAssignments.map((item) => {
+        const itemId = item.itemId ?? item.id;
+        const itemName = item.itemName ?? item.name;
+
+        if (!itemId || !itemName) {
+          throw new Error('Missing item ID or item name.');
+        }
+
+        const allocations = (
+          Array.isArray(item.allocations) ? item.allocations : []
+        ).map((allocation) => {
+          const userId =
+            BACKEND_USER_IDS[allocation.memberId] ||
+            (isValidUUID(allocation.memberId)
+              ? allocation.memberId
+              : null);
+
+          const quantity = Number(allocation.quantity);
+
+          if (!userId) {
+            throw new Error(
+              `Invalid allocation member ID: ${allocation.memberId}`
+            );
+          }
+
+          if (!Number.isFinite(quantity) || quantity < 0) {
+            throw new Error(
+              `Invalid allocation quantity for ${itemName}`
+            );
+          }
+
+          return {
+            userId,
+            quantity,
+          };
+        });
+
+        const purchasedQuantity = Number(item.quantity);
+        const unitPrice = Number(item.unitPrice);
+        const totalPrice = Number(item.totalPrice);
+
+        if (
+          !Number.isFinite(purchasedQuantity) ||
+          purchasedQuantity <= 0 ||
+          !Number.isFinite(unitPrice) ||
+          unitPrice < 0 ||
+          !Number.isFinite(totalPrice) ||
+          totalPrice < 0
+        ) {
+          throw new Error(`Invalid item details for ${itemName}`);
+        }
+
+        const allocatedQuantity = allocations.reduce(
+          (sum, allocation) => sum + allocation.quantity,
+          0
+        );
+
+        if (
+          Math.abs(allocatedQuantity - purchasedQuantity) > 0.000001
+        ) {
+          throw new Error(
+            `Allocated quantities for "${itemName}" must equal its purchased quantity.`
+          );
+        }
+
+        return {
+          itemId,
+          itemName,
+          quantity: purchasedQuantity,
+          unitPrice,
+          totalPrice,
+          allocations,
+        };
+      });
+
+      const response = await addExpenseAPI({
+        groupId: currentGroupId,
+        uploadedBy,
+        receiptData: newExpenseData.receiptData,
+        contributions,
+        itemAssignments,
+      });
+
+      addToast({
+        type: 'success',
+        title: 'Expense Request Successful',
+        message: 'The backend accepted the expense request.',
+      });
+
+      return response;
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: 'Expense Failed',
+        message: error.message,
+      });
+
+      throw error;
+    }
+  };
+
+  // Start real PayPal payment
+  const startPayPalPayment = async ({
+    fromUserId,
+    toUserId,
+    amount,
+  }) => {
+    try {
+      if (!isValidUUID(currentGroupId)) {
+        throw new Error('Please select a valid group.');
+      }
+
+      // Support both frontend aliases and backend UUIDs
+      const backendFromUserId =
+        BACKEND_USER_IDS[fromUserId] ||
+        (isValidUUID(fromUserId) ? fromUserId : null);
+
+      const backendToUserId =
+        BACKEND_USER_IDS[toUserId] ||
+        (isValidUUID(toUserId) ? toUserId : null);
+
+      if (!backendFromUserId || !backendToUserId) {
+        throw new Error('Invalid payer or receiver ID.');
+      }
+
+      if (backendFromUserId === backendToUserId) {
+        throw new Error('Payer and receiver cannot be the same user.');
+      }
+
+      const paymentAmount = Number(amount);
+
+      if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+        throw new Error('Please enter a valid payment amount.');
+      }
+
+      // STEP 1: Create pending settlement
+      const settlementResponse = await createSettlementAPI({
+        groupId: currentGroupId,
+        fromUserId: backendFromUserId,
+        toUserId: backendToUserId,
+        amount: paymentAmount,
+        paymentMethod: 'PAYPAL',
+      });
+
+      // STEP 2: Extract settlement ID
+      const settlementId = settlementResponse?.settlement?.id;
+
+      if (!settlementId) {
+        throw new Error(
+          'Backend did not return a settlement ID.'
+        );
+      }
+
+      // STEP 3: Create PayPal order
+      const orderResponse = await createPayPalOrderAPI(settlementId);
+
+      const {
+        orderID,
+        approvalUrl,
+        amount: paypalAmount,
+        currency: paypalCurrency,
+      } = orderResponse;
+
+      if (!orderID || !approvalUrl) {
+        throw new Error('PayPal order creation failed.');
+      }
+
+      // Do not assume the PayPal currency matches the app currency.
+      console.log('PayPal order details:', {
+        amount: paypalAmount,
+        currency: paypalCurrency,
+        orderID,
+        settlementId,
+      });
+
+      // STEP 4: Save IDs before redirecting
+      sessionStorage.setItem(
+        'paypal_settlement_id',
+        settlementId
+      );
+
+      sessionStorage.setItem(
+        'paypal_order_id',
+        orderID
+      );
+
+      // STEP 5: Redirect to PayPal
+      window.location.assign(approvalUrl);
+    } catch (error) {
+      console.error('PayPal payment initiation failed:', error);
+
+      addToast({
+        type: 'error',
+        title: 'Payment Initialization Failed',
+        message: error.message,
+      });
+
+      throw error;
+    }
+  };
+
+  // Existing local mock settlement function.
+  // Do not use this for real PayPal payments.
+  const settleDebt = ({
+    fromUserId,
+    toUserId,
+    amount,
+    paymentMethod = 'PayPal',
+    note = '',
+  }) => {
+    const txnId = `PAYID-${Math.random()
+      .toString(36)
+      .substring(2, 9)
+      .toUpperCase()}`;
+
     const paidAt = new Date().toISOString();
 
     let settlementRecord = {
@@ -182,7 +522,6 @@ How can I help you today?`,
     };
 
     setSettlements((prev) => {
-      // Find if an existing pending settlement matches between these two members
       const pendingIdx = prev.findIndex(
         (s) =>
           s.groupId === currentGroupId &&
@@ -193,6 +532,7 @@ How can I help you today?`,
 
       if (pendingIdx !== -1) {
         const updated = [...prev];
+
         settlementRecord = {
           ...updated[pendingIdx],
           amount: Number(amount),
@@ -202,14 +542,15 @@ How can I help you today?`,
           paidAt,
           note: note || `Settlement via ${paymentMethod}`,
         };
+
         updated[pendingIdx] = settlementRecord;
+
         return updated;
       }
 
       return [settlementRecord, ...prev];
     });
 
-    // Trigger celebration confetti
     try {
       confetti({
         particleCount: 80,
@@ -217,20 +558,21 @@ How can I help you today?`,
         origin: { y: 0.65 },
         colors: ['#4F46E5', '#10B981', '#0070BA', '#FFC439'],
       });
-    } catch (e) {
-      // safe fallback
+    } catch (error) {
+      console.error('Confetti animation failed:', error);
     }
 
     addToast({
       type: 'success',
       title: 'Payment Successful',
-      message: `Settled ${currency === 'INR' ? '₹' : '$'}${amount} via ${paymentMethod}!`,
+      message: `Settled ${currency === 'INR' ? '₹' : '$'
+        }${amount} via ${paymentMethod}!`,
     });
 
     return settlementRecord;
   };
 
-  // Add AI message to conversation
+  // Add AI message
   const addAiMessage = (msg) => {
     setAiChatHistory((prev) => [
       ...prev,
@@ -242,55 +584,56 @@ How can I help you today?`,
     ]);
   };
 
-  // Calculate current user's net balance across active group
+  // Calculate local demo balances
   const calculateGroupBalances = (groupId = currentGroupId) => {
-    const groupExpenses = expenses.filter((e) => e.groupId === groupId);
+    const groupExpenses = expenses.filter(
+      (e) => e.groupId === groupId
+    );
+
     const groupMembers = currentGroup?.members || [];
 
-    // Net balance per member: { memberId: balance }
-    // Positive means member is owed money; Negative means member owes money
     const balances = {};
-    groupMembers.forEach((m) => {
-      balances[m.id] = 0;
+
+    groupMembers.forEach((member) => {
+      balances[member.id] = 0;
     });
 
-    groupExpenses.forEach((exp) => {
-      const payerId = exp.paidById;
-      const totalAmount = Number(exp.amount);
+    groupExpenses.forEach((expense) => {
+      const payerId = expense.paidById;
+      const totalAmount = Number(expense.amount);
 
-      // Payer gets credited
       if (balances[payerId] !== undefined) {
         balances[payerId] += totalAmount;
       }
 
-      // Each share gets debited
-      if (exp.shares && exp.shares.length > 0) {
-        exp.shares.forEach((share) => {
+      if (expense.shares && expense.shares.length > 0) {
+        expense.shares.forEach((share) => {
           if (balances[share.memberId] !== undefined) {
             balances[share.memberId] -= Number(share.amount);
           }
         });
-      } else {
-        // Equal fallback
+      } else if (groupMembers.length > 0) {
         const perPerson = totalAmount / groupMembers.length;
-        groupMembers.forEach((m) => {
-          balances[m.id] -= perPerson;
+
+        groupMembers.forEach((member) => {
+          balances[member.id] -= perPerson;
         });
       }
     });
 
-    // Factor in completed settlements
     const groupSettlements = settlements.filter(
-      (s) => s.groupId === groupId && s.status === 'Completed'
+      (settlement) =>
+        settlement.groupId === groupId &&
+        settlement.status === 'Completed'
     );
 
-    groupSettlements.forEach((s) => {
-      // From payer paid To receiver
-      if (balances[s.fromUserId] !== undefined) {
-        balances[s.fromUserId] += Number(s.amount);
+    groupSettlements.forEach((settlement) => {
+      if (balances[settlement.fromUserId] !== undefined) {
+        balances[settlement.fromUserId] += Number(settlement.amount);
       }
-      if (balances[s.toUserId] !== undefined) {
-        balances[s.toUserId] -= Number(s.amount);
+
+      if (balances[settlement.toUserId] !== undefined) {
+        balances[settlement.toUserId] -= Number(settlement.amount);
       }
     });
 
@@ -307,11 +650,13 @@ How can I help you today?`,
         currentGroup,
         currentGroupId,
         setCurrentGroupId,
+        groupsLoading,
         createGroup,
         expenses,
         addExpense,
         settlements,
         settleDebt,
+        startPayPalPayment,
         activeScan,
         setActiveScan,
         toasts,
@@ -331,9 +676,10 @@ How can I help you today?`,
 
 export function useApp() {
   const context = useContext(AppContext);
+
   if (!context) {
     throw new Error('useApp must be used within an AppProvider');
   }
+
   return context;
 }
-

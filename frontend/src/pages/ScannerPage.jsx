@@ -31,7 +31,14 @@ export default function ScannerPage() {
         });
 
         const aiData = await scanReceiptAPI(fileOrSampleId);
-
+        if (
+          !aiData ||
+          !Array.isArray(aiData.items) ||
+          aiData.items.length === 0 ||
+          !Number.isFinite(Number(aiData.total))
+        ) {
+          throw new Error('Invalid receipt data returned by AI.');
+        }
         setScanProgress({
           step: 2,
           message: 'Processing extracted receipt data...',
@@ -44,29 +51,31 @@ export default function ScannerPage() {
           qty: Number(item.quantity),
           price: Number(item.unit_price),
           amount: Number(item.total_price),
+          allocations: [],
           assignedMemberIds: [],
         }));
 
-        const subtotal = items.reduce(
-          (sum, item) => sum + item.amount,
-          0
-        );
-
-        const grandTotal = Number(aiData.total);
-        const taxAmount = Number(aiData.tax || 0);
-        const taxRate = subtotal > 0 ? taxAmount / subtotal : 0;
         result = {
           id: `ai-scan-${Date.now()}`,
+
+          // Preserve the complete, original AI response.
+          receiptData: aiData,
+
+          // UI-friendly fields.
           merchant: aiData.merchant,
           currency: aiData.currency,
           items,
-          subtotal,
-          taxAmount,
-          taxRate,
-          serviceCharge: 0,
-          grandTotal,
+
+          subtotal: aiData.subtotal,
+          taxAmount: aiData.tax,
+          taxBreakdown: aiData.taxBreakdown,
+          discount: aiData.discount,
+          serviceCharge: aiData.serviceCharge,
+          grandTotal: aiData.total,
+
           date: new Date().toISOString().split('T')[0],
           category: 'Food & Dining',
+          sourceType: 'ai',
         };
       } else {
         // Preserve existing sample receipt functionality

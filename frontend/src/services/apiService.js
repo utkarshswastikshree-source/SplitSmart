@@ -11,7 +11,7 @@ export const BACKEND_USER_IDS = {
 
 // Common API request handler
 async function apiRequest(endpoint, options = {}) {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const response = await fetch(`${API_BASE_URL}${endpoint} `, {
         ...options,
         headers: {
             'Content-Type': 'application/json',
@@ -22,7 +22,12 @@ async function apiRequest(endpoint, options = {}) {
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-        throw new Error(data.message || `Request failed (${response.status})`);
+        throw new Error(
+            data.message ||
+            data.error ||
+            data.details ||
+            `Request failed(${response.status})`
+        );
     }
 
     return data;
@@ -39,25 +44,36 @@ export async function createGroupAPI(groupName) {
     });
 }
 
-// Add an expense
+// Fetch all groups for a user
+export async function getGroupsAPI(userId) {
+    return apiRequest(`/ api / groups / ${userId} `);
+}
+
+// Fetch members of a group
+export async function getGroupMembersAPI(groupId) {
+    return apiRequest(`/ api / groups / ${groupId}/members`);
+}
+
+// Add an expense with multiple contributors
 export async function addExpenseAPI({
     groupId,
-    paidBy,
-    totalAmount,
-    receiptUrl = null,
-    splits,
+    uploadedBy,
+    receiptData,
+    contributions,
+    itemAssignments,
 }) {
     return apiRequest('/api/add-expense', {
         method: 'POST',
         body: JSON.stringify({
             groupId,
-            paidBy,
-            totalAmount,
-            receiptUrl,
-            splits,
+            uploadedBy,
+            receiptData,
+            contributions,
+            itemAssignments,
         }),
     });
 }
+
 // Scan receipt using the AI backend
 export async function scanReceiptAPI(receiptFile) {
     const formData = new FormData();
@@ -74,8 +90,58 @@ export async function scanReceiptAPI(receiptFile) {
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok || !data.success) {
-        throw new Error(data.message || 'Receipt scanning failed.');
+        throw new Error(
+            data.message ||
+            data.error ||
+            data.details ||
+            'Receipt scanning failed.'
+        );
+    }
+
+    if (!data.data || !Array.isArray(data.data.items)) {
+        throw new Error('Invalid receipt data received from AI.');
     }
 
     return data.data;
+}
+
+// Create a pending settlement in the backend
+export async function createSettlementAPI({
+    groupId,
+    fromUserId,
+    toUserId,
+    amount,
+    paymentMethod = 'PAYPAL',
+}) {
+    return apiRequest('/api/settlements', {
+        method: 'POST',
+        body: JSON.stringify({
+            groupId,
+            fromUserId,
+            toUserId,
+            amount,
+            paymentMethod,
+        }),
+    });
+}
+
+// Create PayPal order for an existing pending settlement
+export async function createPayPalOrderAPI(settlementId) {
+    return apiRequest('/api/paypal/create-order', {
+        method: 'POST',
+        body: JSON.stringify({
+            settlementId,
+        }),
+    });
+}
+
+// Capture an approved PayPal order
+export async function capturePayPalOrderAPI(settlementId, orderID) {
+    return apiRequest('/api/paypal/capture-order', {
+        method: 'POST',
+        body: JSON.stringify({
+            settlementId,
+            orderID,
+        }),
+    });
 }

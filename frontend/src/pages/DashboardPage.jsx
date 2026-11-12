@@ -157,14 +157,20 @@ export default function DashboardPage() {
                 <button
                   key={m.id}
                   onClick={() => setCurrentUser(m)}
-                  className={`px-2.5 py-1 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                    isSelected
-                      ? 'bg-brand-500 text-white shadow-xs'
-                      : 'bg-white/10 hover:bg-white/20 text-slate-300'
-                  }`}
+                  className={`px-2.5 py-1 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${isSelected
+                    ? 'bg-brand-500 text-white shadow-xs'
+                    : 'bg-white/10 hover:bg-white/20 text-slate-300'
+                    }`}
                 >
-                  <Avatar src={m.avatar} name={m.name} size="xs" showBorder={false} />
-                  <span>{m.name.split(' ')[0]}</span>
+                  <Avatar
+                    src={m.avatar}
+                    name={m.name || m.id || 'Member'}
+                    size="xs"
+                    showBorder={false}
+                  />
+                  <span>
+                    {String(m.name || m.id || 'Member').split(' ')[0]}
+                  </span>
                 </button>
               );
             })}
