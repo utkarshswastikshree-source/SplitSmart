@@ -2,6 +2,7 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
+const paypalRoutes = require('./routes/paypal');
 require('dotenv').config();
 
 const app = express();
@@ -979,7 +980,49 @@ app.get('/api/settlements/:groupId', async (req, res) => {
         });
     }
 });
+// ==========================================
+// PAYPAL CONFIGURATION
+// ==========================================
 
+const PAYPAL_BASE_URL =
+    process.env.PAYPAL_BASE_URL ||
+    'https://api-m.sandbox.paypal.com';
+
+async function getPayPalAccessToken() {
+    const credentials = Buffer.from(
+        `${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`
+    ).toString('base64');
+
+    const response = await fetch(
+        `${PAYPAL_BASE_URL}/v1/oauth2/token`,
+        {
+            method: 'POST',
+            headers: {
+                Authorization: `Basic ${credentials}`,
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: 'grant_type=client_credentials'
+        }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || !data.access_token) {
+        throw new Error('Unable to get PayPal access token');
+    }
+
+    return data.access_token;
+}
+
+// Mount PayPal routes
+app.use(
+    '/api/paypal',
+    paypalRoutes({
+        pool,
+        getPayPalAccessToken,
+        PAYPAL_BASE_URL
+    })
+);
 // ==========================================
 // 12. SERVER START
 // ==========================================
