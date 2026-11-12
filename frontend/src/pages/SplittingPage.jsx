@@ -21,12 +21,7 @@ import {
 } from 'lucide-react';
 
 export default function SplittingPage() {
-  useEffect(() => {
-    if (activeScan) {
-      setReceiptData(activeScan);
-      setContributionAmounts({});
-    }
-  }, [activeScan]);
+
   const {
     activeScan,
     currentGroup,
@@ -42,7 +37,12 @@ export default function SplittingPage() {
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [isAiParsing, setIsAiParsing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
+  useEffect(() => {
+    if (activeScan) {
+      setReceiptData(activeScan);
+      setContributionAmounts({});
+    }
+  }, [activeScan]);
   const members = currentGroup?.members || [];
   const items = receiptData?.items || [];
 
@@ -270,6 +270,7 @@ export default function SplittingPage() {
       }));
 
       await addExpense({
+        totalAmount: billTotal,
         receiptData: receiptData.receiptData,
 
         contributions: contributions.map((member) => ({

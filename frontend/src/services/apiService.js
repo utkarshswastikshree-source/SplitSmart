@@ -1,7 +1,5 @@
 
-const API_BASE_URL = 'https://splitsmart-backend-zhwd.onrender.com';
-
-// Frontend member IDs mapped to actual backend UUIDs
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 export const BACKEND_USER_IDS = {
     'user-1': '123e4567-e89b-12d3-a456-426614174000', // Rahul Sharma
     'user-2': '11111111-1111-1111-1111-111111111111', // Aman Verma
@@ -58,6 +56,7 @@ export async function getGroupMembersAPI(groupId) {
 export async function addExpenseAPI({
     groupId,
     uploadedBy,
+    totalAmount,
     receiptData,
     contributions,
     itemAssignments,
@@ -67,13 +66,13 @@ export async function addExpenseAPI({
         body: JSON.stringify({
             groupId,
             uploadedBy,
+            totalAmount,
             receiptData,
             contributions,
             itemAssignments,
         }),
     });
 }
-
 // Scan receipt using the AI backend
 export async function scanReceiptAPI(receiptFile) {
     const formData = new FormData();

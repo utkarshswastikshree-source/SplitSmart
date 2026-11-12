@@ -25,7 +25,9 @@ export default function ExtractedItemsTable({
       if (item.id === id) {
         const updatedItem = { ...item, [field]: value };
         if (field === 'qty' || field === 'price') {
-          const qty = field === 'qty' ? Math.max(1, parseFloat(value) || 1) : item.qty;
+          const qty = field === 'qty'
+            ? Math.max(0, parseFloat(value) || 0)
+            : item.qty;
           const price = field === 'price' ? Math.max(0, parseFloat(value) || 0) : item.price;
           updatedItem.qty = qty;
           updatedItem.price = price;
@@ -38,7 +40,6 @@ export default function ExtractedItemsTable({
 
     recalculate(updated);
   };
-
   const handleAddItem = () => {
     const newItem = {
       id: `it-${Date.now()}`,
@@ -46,9 +47,12 @@ export default function ExtractedItemsTable({
       qty: 1,
       price: 100,
       amount: 100,
+      allocations: [],
       assignedMemberIds: [],
     };
+
     const updated = [...items, newItem];
+
     recalculate(updated);
     setEditingItemId(newItem.id);
   };
@@ -60,22 +64,12 @@ export default function ExtractedItemsTable({
   };
 
   const recalculate = (updatedItems) => {
-    const subtotal = updatedItems.reduce((acc, it) => acc + (Number(it.amount) || 0), 0);
-    const taxRate = extractedData.taxRate || 0.05;
-    const taxAmount = Math.round(subtotal * taxRate);
-    const serviceCharge = extractedData.serviceCharge || 0;
-    const grandTotal = subtotal + taxAmount + serviceCharge;
-
     onChange({
       ...extractedData,
       merchant: merchantName,
       items: updatedItems,
-      subtotal,
-      taxAmount,
-      grandTotal,
     });
   };
-
   return (
     <div className="bg-white rounded-3xl border border-slate-200/80 shadow-soft overflow-hidden">
       {/* Receipt Header details */}
@@ -183,9 +177,12 @@ export default function ExtractedItemsTable({
                     {isEditing ? (
                       <input
                         type="number"
-                        min="1"
+                        min="0"
+                        step="any"
                         value={item.qty}
-                        onChange={(e) => handleItemChange(item.id, 'qty', e.target.value)}
+                        onChange={(e) =>
+                          handleItemChange(item.id, 'qty', e.target.value)
+                        }
                         className="w-14 px-1.5 py-1 text-center text-sm rounded-lg border border-brand-300 focus:outline-none"
                       />
                     ) : (
@@ -265,7 +262,8 @@ export default function ExtractedItemsTable({
               </span>
             </div>
             <div className="flex justify-between text-slate-600">
-              <span>GST / Taxes (5%):</span>
+
+              <span>GST / Taxes:</span>
               <span className="font-semibold text-navy-900">
                 {formatCurrency(extractedData.taxAmount, currency)}
               </span>

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+
 import DashboardLayout from './components/layout/DashboardLayout';
 import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
@@ -12,12 +13,24 @@ import SplittingPage from './pages/SplittingPage';
 import SettlementPage from './pages/SettlementPage';
 import AiAssistantPage from './pages/AiAssistantPage';
 import NotFoundPage from './pages/NotFoundPage';
+import PayPalReturnPage from './pages/PayPalReturnPage';
+
+function HomePage() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+
+  if (params.has('token')) {
+    return <PayPalReturnPage />;
+  }
+
+  return <LandingPage />;
+}
 
 export default function App() {
   return (
     <Routes>
       {/* Public Pages */}
-      <Route path="/" element={<LandingPage />} />
+      <Route path="/" element={<HomePage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
 
@@ -37,4 +50,3 @@ export default function App() {
     </Routes>
   );
 }
-

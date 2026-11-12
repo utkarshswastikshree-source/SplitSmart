@@ -1,6 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, Image as ImageIcon, Sparkles, CheckCircle2, FileText, ArrowRight } from 'lucide-react';
-import Button from '../common/Button';
+import { UploadCloud, Image as ImageIcon, Sparkles, CheckCircle2, FileText, ArrowRight, X } from 'lucide-react'; import Button from '../common/Button';
 import { SAMPLE_RECEIPTS } from '../../services/mockData';
 import { cn } from '../../utils/cn';
 
@@ -76,7 +75,21 @@ export default function ReceiptDropzone({ onSelectReceipt, isScanning }) {
         )}
 
         {selectedPreview ? (
-          <div className="flex flex-col items-center gap-3">
+          <div className="flex flex-col items-center gap-3 relative">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedPreview(null);
+                if (fileInputRef.current) {
+                  fileInputRef.current.value = '';
+                }
+              }}
+              className="absolute -top-3 right-0 p-2 rounded-full bg-rose-100 text-rose-600 hover:bg-rose-200"
+              title="Remove receipt"
+            >
+              <X className="w-4 h-4" />
+            </button>
             <div className="relative w-36 h-48 rounded-xl overflow-hidden shadow-lg border border-slate-200">
               <img
                 src={selectedPreview}

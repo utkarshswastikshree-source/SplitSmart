@@ -1,9 +1,8 @@
 import React from 'react';
 import Avatar from '../common/Avatar';
-import Badge from '../common/Badge';
 import Button from '../common/Button';
 import { formatCurrency } from '../../utils/formatters';
-import { Users, Check, RotateCcw } from 'lucide-react';
+import { Users, RotateCcw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { cn } from '../../utils/cn';
 
 export default function ItemAssigner({
@@ -12,56 +11,94 @@ export default function ItemAssigner({
   onChangeItems,
   currency = 'INR',
 }) {
-  // Toggle a member assignment on an item
-  const handleToggleMember = (itemId, memberId) => {
+  // Get the purchased quantity, supporting the old and new item formats.
+  const getItemQuantity = (item) =>
+    Number(item.quantity ?? item.qty ?? 0);
+
+  // Get the current allocations.
+  const getAllocations = (item) =>
+    Array.isArray(item.allocations) ? item.allocations : [];
+
+  // Update one member's allocated quantity for an item.
+  const handleQuantityChange = (itemId, memberId, value) => {
     const updated = items.map((item) => {
-      if (item.id === itemId) {
-        const assigned = item.assignedMemberIds || [];
-        const exists = assigned.includes(memberId);
-        const newAssigned = exists
-          ? assigned.filter((id) => id !== memberId)
-          : [...assigned, memberId];
+      if (item.id !== itemId) return item;
 
-        // Ensure at least 1 person or default to all if empty
-        return {
-          ...item,
-          assignedMemberIds: newAssigned,
-        };
+      const allocations = getAllocations(item);
+      const quantity = value === '' ? 0 : Number(value);
+
+      const otherAllocations = allocations.filter(
+        (allocation) => allocation.memberId !== memberId
+      );
+
+      if (!Number.isFinite(quantity) || quantity < 0) {
+        return item;
       }
-      return item;
+
+      return {
+        ...item,
+        allocations:
+          quantity > 0
+            ? [...otherAllocations, { memberId, quantity }]
+            : otherAllocations,
+      };
     });
+
     onChangeItems(updated);
   };
 
-  // Assign all members to all items (Equal Split All)
+  // Divide each item's quantity equally among all members.
   const handleEqualSplitAll = () => {
-    const allMemberIds = members.map((m) => m.id);
-    const updated = items.map((item) => ({
-      ...item,
-      assignedMemberIds: [...allMemberIds],
-    }));
+    if (members.length === 0) return;
+
+    const updated = items.map((item) => {
+      const totalQuantity = getItemQuantity(item);
+      const quantityPerMember = totalQuantity / members.length;
+
+      const allocations = members.map((member, index) => {
+        // Give the final member the remainder to avoid rounding differences.
+        const allocatedQuantity =
+          index === members.length - 1
+            ? totalQuantity -
+            quantityPerMember * (members.length - 1)
+            : quantityPerMember;
+
+        return {
+          memberId: member.id,
+          quantity: Number(allocatedQuantity.toFixed(6)),
+        };
+      });
+
+      return {
+        ...item,
+        allocations,
+      };
+    });
+
     onChangeItems(updated);
   };
 
-  // Clear assignments
+  // Remove all allocations.
   const handleResetAssignments = () => {
     const updated = items.map((item) => ({
       ...item,
-      assignedMemberIds: [],
+      allocations: [],
     }));
+
     onChangeItems(updated);
   };
 
   return (
     <div className="bg-white rounded-3xl border border-slate-200/80 shadow-soft overflow-hidden">
-      {/* Header with Quick Actions */}
+
+      {/* Header */}
       <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50">
         <div>
           <h3 className="text-base font-bold text-navy-900">
             Assign Items to Group Members
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            Click member names to add or remove them from each bill line item.
+            Enter how much of each item's quantity each member consumed.
           </p>
         </div>
 
@@ -75,6 +112,7 @@ export default function ItemAssigner({
           >
             Split All Equally
           </Button>
+
           <Button
             variant="ghost"
             size="sm"
@@ -87,83 +125,148 @@ export default function ItemAssigner({
         </div>
       </div>
 
-      {/* Items list with member chips */}
+      {/* Items */}
       <div className="divide-y divide-slate-100">
         {items.map((item, index) => {
-          const assignedIds = item.assignedMemberIds || [];
-          const assignedCount = assignedIds.length || 1;
-          const sharePerPerson = item.amount / assignedCount;
+          const purchasedQuantity = getItemQuantity(item);
+          const allocations = getAllocations(item);
+
+          const allocatedQuantity = allocations.reduce(
+            (sum, allocation) =>
+              sum + Number(allocation.quantity || 0),
+            0
+          );
+
+          const remainingQuantity =
+            purchasedQuantity - allocatedQuantity;
+
+          const isValid =
+            purchasedQuantity > 0 &&
+            Math.abs(remainingQuantity) < 0.000001;
+
+          const unitPrice = Number(
+            item.unitPrice ?? item.unit_price ?? item.price ?? 0
+          );
+
+          const totalPrice = Number(
+            item.totalPrice ?? item.total_price ?? item.amount ?? 0
+          );
 
           return (
             <div
               key={item.id}
               className="p-4 sm:p-5 hover:bg-slate-50/60 transition-colors"
             >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+              {/* Item information */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                 <div className="flex items-center gap-3">
                   <span className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-xs font-bold flex items-center justify-center shrink-0">
                     {index + 1}
                   </span>
+
                   <div>
                     <h4 className="text-sm font-bold text-navy-900">
                       {item.name}
                     </h4>
+
                     <span className="text-xs text-slate-500">
-                      Qty: {item.qty} × {formatCurrency(item.price, currency)}
+                      Qty: {purchasedQuantity} ×{' '}
+                      {formatCurrency(unitPrice, currency)}
                     </span>
                   </div>
                 </div>
 
                 <div className="text-right">
                   <span className="text-sm font-bold text-navy-950 block">
-                    {formatCurrency(item.amount, currency)}
+                    {formatCurrency(totalPrice, currency)}
                   </span>
-                  {assignedIds.length > 0 && (
-                    <span className="text-[11px] font-medium text-brand-600">
-                      {formatCurrency(sharePerPerson, currency)} / person
-                    </span>
-                  )}
+                  <span className="text-[11px] text-slate-500">
+                    Original item total
+                  </span>
                 </div>
               </div>
 
-              {/* Member toggle selector */}
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mr-1">
-                  Assigned to:
+              {/* Quantity allocation inputs */}
+              <div className="space-y-3">
+                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  Quantity consumed by each member
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {members.map((member) => {
+                    const allocation = allocations.find(
+                      (entry) => entry.memberId === member.id
+                    );
+
+                    const memberQuantity = allocation
+                      ? allocation.quantity
+                      : '';
+
+                    return (
+                      <div
+                        key={member.id}
+                        className="flex items-center justify-between gap-3 p-2.5 rounded-xl border border-slate-200 bg-slate-50/70"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Avatar
+                            src={member.avatar}
+                            name={member.name || member.id || 'Member'}
+                            size="xs"
+                            showBorder={false}
+                          />
+
+                          <span className="text-xs font-semibold text-navy-900 truncate">
+                            {member.name || member.id || 'Member'}
+                          </span>
+                        </div>
+
+                        <input
+                          type="number"
+                          min="0"
+                          max={purchasedQuantity}
+                          step="any"
+                          value={memberQuantity}
+                          placeholder="0"
+                          onChange={(event) =>
+                            handleQuantityChange(
+                              item.id,
+                              member.id,
+                              event.target.value
+                            )
+                          }
+                          className="w-20 px-2 py-1.5 text-sm text-center font-semibold border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Allocation validation */}
+              <div
+                className={cn(
+                  'mt-3 flex items-center justify-between gap-2 text-xs font-medium',
+                  isValid
+                    ? 'text-emerald-600'
+                    : 'text-amber-600'
+                )}
+              >
+                <span className="flex items-center gap-1.5">
+                  {isValid ? (
+                    <CheckCircle2 className="w-4 h-4" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4" />
+                  )}
+
+                  {isValid
+                    ? 'Quantity fully allocated'
+                    : 'Quantity allocation incomplete or exceeds total'}
                 </span>
 
-                {members.map((member) => {
-                  const isAssigned = assignedIds.includes(member.id);
-
-                  return (
-                    <button
-                      key={member.id}
-                      type="button"
-                      onClick={() => handleToggleMember(item.id, member.id)}
-                      className={cn(
-                        'flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold transition-all select-none',
-                        isAssigned
-                          ? 'bg-brand-600 text-white shadow-xs ring-1 ring-brand-600'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200/80 border border-slate-200/60'
-                      )}
-                    >
-                      <Avatar
-                        src={member.avatar}
-                        name={member.name}
-                        size="xs"
-                        showBorder={false}
-                      />
-                      <span>{member.name.split(' ')[0]}</span>
-                      {isAssigned && <Check className="w-3 h-3 text-white ml-0.5" />}
-                    </button>
-                  );
-                })}
-
-                {assignedIds.length === 0 && (
-                  <span className="text-xs text-amber-600 font-medium italic">
-                    Unassigned (Tap members to split)
-                  </span>
-                )}
+                <span>
+                  Allocated: {allocatedQuantity.toFixed(3)} /{' '}
+                  {purchasedQuantity}
+                </span>
               </div>
             </div>
           );
@@ -172,4 +275,3 @@ export default function ItemAssigner({
     </div>
   );
 }
-

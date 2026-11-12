@@ -1,3 +1,4 @@
+
 import React, {
   createContext,
   useContext,
@@ -291,6 +292,12 @@ How can I help you today?`,
         };
       });
 
+      // Filter out zero-value contributions before sending to backend.
+      // Group members and item allocations remain unchanged.
+      const validContributions = contributions.filter(
+        (item) => Number(item.amountPaid) > 0
+      );
+
       const itemAssignments = newExpenseData.itemAssignments.map((item) => {
         const itemId = item.itemId ?? item.id;
         const itemName = item.itemName ?? item.name;
@@ -369,8 +376,9 @@ How can I help you today?`,
       const response = await addExpenseAPI({
         groupId: currentGroupId,
         uploadedBy,
+        totalAmount: Number(newExpenseData.totalAmount),
         receiptData: newExpenseData.receiptData,
-        contributions,
+        contributions: validContributions,
         itemAssignments,
       });
 

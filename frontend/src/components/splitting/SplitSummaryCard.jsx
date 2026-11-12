@@ -1,175 +1,269 @@
 import React from 'react';
-import Avatar from '../common/Avatar';
 import Button from '../common/Button';
-import Badge from '../common/Badge';
-import { formatCurrency } from '../../utils/formatters';
-import { CheckCircle2, ArrowRight, ShieldCheck, CreditCard } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Users, Package } from 'lucide-react';
 
 export default function SplitSummaryCard({
-  items,
-  members,
-  taxAmount = 0,
-  serviceCharge = 0,
-  grandTotal = 0,
+  items = [],
+  members = [],
   onConfirmSplit,
-  currency = 'INR',
-  isSubmitting = false,
 }) {
-  // Check for any unassigned items
-  const unassignedItems = items.filter(
-    (it) => !it.assignedMemberIds || it.assignedMemberIds.length === 0
-  );
+  const getQuantity = (item) =>
+    Number(item.qty ?? item.quantity ?? 0);
 
-  // Calculate raw subtotal per member from assigned items
-  const subtotal = items.reduce((acc, it) => acc + (Number(it.amount) || 0), 0);
+  const getAllocations = (item) =>
+    Array.isArray(item.allocations) ? item.allocations : [];
 
-  const memberShares = members.map((member) => {
-    let itemTotal = 0;
+  const allocationDetails = items.map((item) => {
+    const purchasedQuantity = getQuantity(item);
 
-    items.forEach((item) => {
-      const assigned = item.assignedMemberIds || [];
-      if (assigned.includes(member.id)) {
-        itemTotal += item.amount / assigned.length;
-      }
-    });
+    const allocations = getAllocations(item);
 
-    // Proportionate distribution of tax and service charge based on item share
-    const ratio = subtotal > 0 ? itemTotal / subtotal : 1 / members.length;
-    const taxShare = taxAmount * ratio;
-    const serviceShare = serviceCharge * ratio;
-    const totalShare = itemTotal + taxShare + serviceShare;
+    const allocatedQuantity = allocations.reduce(
+      (sum, allocation) =>
+        sum + Number(allocation.quantity || 0),
+      0
+    );
+
+    const remainingQuantity =
+      purchasedQuantity - allocatedQuantity;
+
+    const valid =
+      purchasedQuantity > 0 &&
+      remainingQuantity >= -0.000001 &&
+      Math.abs(remainingQuantity) < 0.000001;
 
     return {
-      ...member,
-      itemTotal,
-      taxShare,
-      serviceShare,
-      totalShare: Math.round(totalShare * 100) / 100,
+      id: item.id,
+      name: item.name,
+      purchasedQuantity,
+      allocatedQuantity,
+      remainingQuantity,
+      allocations,
+      valid,
     };
   });
 
-  const totalAllocated = memberShares.reduce((sum, m) => sum + m.totalShare, 0);
-  const isBalanced = Math.abs(totalAllocated - grandTotal) <= 1.0; // Allow 1 rupee rounding margin
+  const fullyAllocated = allocationDetails.filter(
+    (item) => item.valid
+  ).length;
+
+  const incompleteItems = allocationDetails.filter(
+    (item) => !item.valid
+  );
+
+  const allAllocated =
+    items.length > 0 &&
+    fullyAllocated === items.length;
+
+  const canConfirm =
+    allAllocated &&
+    members.length > 0;
 
   return (
-    <div className="bg-white rounded-3xl border border-slate-200/80 shadow-card p-6 flex flex-col justify-between">
+    <div className="bg-white rounded-3xl border border-slate-200 shadow-soft p-5 space-y-5">
+
+      {/* Heading */}
       <div>
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
-          <div>
-            <h3 className="text-base font-bold text-navy-900">
-              Individual Shares Summary
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Taxes and service charges are allocated proportionally.
-            </p>
+        <h3 className="text-base font-bold text-navy-900">
+          Allocation Summary
+        </h3>
+
+        <p className="text-xs text-slate-500 mt-1">
+          Review who is consuming each item.
+        </p>
+      </div>
+
+      {/* Summary counters */}
+      <div className="grid grid-cols-2 gap-3">
+
+        <div className="rounded-2xl bg-brand-50 border border-brand-100 p-3">
+          <div className="flex items-center gap-2 text-brand-600">
+            <Package className="w-4 h-4" />
+
+            <span className="text-xs font-semibold">
+              Total Items
+            </span>
           </div>
-          <Badge variant="brand" size="md">
-            {members.length} Members
-          </Badge>
+
+          <p className="text-2xl font-black text-navy-900 mt-2">
+            {items.length}
+          </p>
         </div>
 
-        {/* Validation warning if any item is unassigned */}
-        {unassignedItems.length > 0 && (
-          <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2">
-            <span className="font-bold">⚠️</span>
-            <span>
-              <strong>{unassignedItems.length} item(s) unassigned:</strong> Assign all items to members to balance the bill total.
+        <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-3">
+          <div className="flex items-center gap-2 text-emerald-600">
+            <CheckCircle2 className="w-4 h-4" />
+
+            <span className="text-xs font-semibold">
+              Completed
             </span>
+          </div>
+
+          <p className="text-2xl font-black text-navy-900 mt-2">
+            {fullyAllocated}
+            <span className="text-sm text-slate-400">
+              /{items.length}
+            </span>
+          </p>
+        </div>
+
+      </div>
+
+      {/* Allocation progress */}
+      <div>
+        <div className="flex justify-between text-xs mb-2">
+          <span className="font-semibold text-slate-600">
+            Allocation progress
+          </span>
+
+          <span className="font-bold text-navy-900">
+            {items.length > 0
+              ? Math.round((fullyAllocated / items.length) * 100)
+              : 0}%
+          </span>
+        </div>
+
+        <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+          <div
+            className="h-full bg-emerald-500 rounded-full transition-all"
+            style={{
+              width: `${items.length > 0
+                  ? (fullyAllocated / items.length) * 100
+                  : 0
+                }%`,
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Individual item status */}
+      <div>
+        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+          Item-wise Allocation
+        </h4>
+
+        {allocationDetails.length === 0 ? (
+          <p className="text-sm text-slate-400 text-center py-4">
+            No items available.
+          </p>
+        ) : (
+          <div className="space-y-3 max-h-72 overflow-y-auto">
+
+            {allocationDetails.map((item) => (
+              <div
+                key={item.id}
+                className="p-3 rounded-xl border border-slate-200 bg-slate-50"
+              >
+                <div className="flex items-start justify-between gap-2">
+
+                  <div>
+                    <p className="text-sm font-semibold text-navy-900">
+                      {item.name || 'Unnamed item'}
+                    </p>
+
+                    <p className="text-xs text-slate-500 mt-1">
+                      Allocated: {item.allocatedQuantity} / {item.purchasedQuantity}
+                    </p>
+                  </div>
+
+                  {item.valid ? (
+                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">
+                      Complete
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded-lg">
+                      Incomplete
+                    </span>
+                  )}
+
+                </div>
+
+                {/* Assigned members */}
+                <div className="flex flex-wrap gap-1.5 mt-3">
+
+                  {item.allocations.map((allocation, index) => {
+                    const member = members.find(
+                      (person) => person.id === allocation.memberId
+                    );
+
+                    return (
+                      <span
+                        key={`${allocation.memberId}-${index}`}
+                        className="text-[10px] px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600"
+                      >
+                        {member?.name || member?.id || 'Member'}: {allocation.quantity}
+                      </span>
+                    );
+                  })}
+
+                  {item.allocations.length === 0 && (
+                    <span className="text-[10px] text-slate-400">
+                      No members assigned
+                    </span>
+                  )}
+
+                </div>
+
+                {!item.valid && (
+                  <p className="text-[11px] text-amber-600 mt-2">
+                    {item.remainingQuantity > 0
+                      ? `${item.remainingQuantity} quantity still needs allocation.`
+                      : 'Allocated quantity exceeds purchased quantity.'}
+                  </p>
+                )}
+              </div>
+            ))}
+
           </div>
         )}
-
-        {/* Member breakdown cards */}
-        <div className="space-y-3">
-          {memberShares.map((m) => (
-            <div
-              key={m.id}
-              className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50/70 border border-slate-200/60 hover:bg-slate-50 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <Avatar src={m.avatar} name={m.name} size="sm" />
-                <div>
-                  <h4 className="text-xs font-bold text-navy-900 flex items-center gap-1.5">
-                    {m.name}
-                    {m.isCurrentUser && (
-                      <span className="text-[10px] bg-brand-100 text-brand-700 font-semibold px-1.5 py-0.2 rounded">
-                        You
-                      </span>
-                    )}
-                  </h4>
-                  <p className="text-[11px] text-slate-500">
-                    Items: {formatCurrency(m.itemTotal, currency)} + Tax/Tip: {formatCurrency(m.taxShare + m.serviceShare, currency)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="text-right">
-                <span className="text-sm font-extrabold text-navy-950 block">
-                  {formatCurrency(m.totalShare, currency)}
-                </span>
-                <span className="text-[10px] text-slate-400">
-                  {subtotal > 0 ? Math.round((m.itemTotal / subtotal) * 100) : 25}% of bill
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Bill Total & Validation Balance recap */}
-        <div className="mt-5 p-4 rounded-2xl bg-brand-50/50 border border-brand-100 space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CreditCard className="w-4 h-4 text-brand-600" />
-              <span className="text-xs font-semibold text-brand-900">
-                Sum of Allocations
-              </span>
-            </div>
-            <span className="text-base font-black text-brand-900">
-              {formatCurrency(totalAllocated, currency)}
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between text-xs pt-1 border-t border-brand-200/50 text-slate-600">
-            <span>Bill Grand Total:</span>
-            <span className="font-bold text-navy-900">{formatCurrency(grandTotal, currency)}</span>
-          </div>
-
-          <div className="flex items-center justify-between pt-1 text-[11px]">
-            <span className="text-slate-500">Audit Status:</span>
-            {isBalanced && unassignedItems.length === 0 ? (
-              <span className="font-bold text-emerald-600 flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" /> 100% Balanced
-              </span>
-            ) : (
-              <span className="font-bold text-amber-600">
-                Pending full item assignment
-              </span>
-            )}
-          </div>
-        </div>
       </div>
 
-      {/* Confirmation Action */}
-      <div className="mt-6 pt-5 border-t border-slate-100 space-y-3">
-        <Button
-          variant="primary"
-          size="lg"
-          onClick={() => onConfirmSplit(memberShares)}
-          loading={isSubmitting}
-          disabled={unassignedItems.length > 0}
-          icon={CheckCircle2}
-          className="w-full shadow-md shadow-brand-500/25 disabled:opacity-50 disabled:pointer-events-none"
-        >
-          {unassignedItems.length > 0
-            ? 'Assign All Items to Continue'
-            : 'Confirm Split & Record Expense'}
-        </Button>
+      {/* Member count */}
+      <div className="flex items-center justify-between border-t border-slate-100 pt-4">
+        <div className="flex items-center gap-2 text-slate-500">
+          <Users className="w-4 h-4" />
 
-        <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-          <span>Generates instant debt balances for 1-click PayPal settlement</span>
+          <span className="text-xs font-medium">
+            Group members
+          </span>
         </div>
+
+        <span className="text-sm font-bold text-navy-900">
+          {members.length}
+        </span>
       </div>
+
+      {/* Validation message */}
+      {!allAllocated && (
+        <div className="flex gap-2 p-3 rounded-xl bg-amber-50 border border-amber-100">
+          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+
+          <p className="text-xs text-amber-700">
+            Allocate the complete quantity of every item before continuing.
+          </p>
+        </div>
+      )}
+
+      {allAllocated && members.length > 0 && (
+        <div className="flex gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+
+          <p className="text-xs text-emerald-700">
+            All item quantities have been allocated successfully.
+          </p>
+        </div>
+      )}
+
+      {/* Continue */}
+      <Button
+        variant="primary"
+        className="w-full"
+        disabled={!canConfirm}
+        onClick={onConfirmSplit}
+      >
+        Review & Confirm
+      </Button>
+
     </div>
   );
 }
-

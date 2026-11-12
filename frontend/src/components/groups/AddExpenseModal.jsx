@@ -145,9 +145,13 @@ export default function AddExpenseModal({ isOpen, onClose }) {
                     : 'border-slate-200 hover:border-slate-300 bg-white'
                     }`}
                 >
-                  <Avatar src={m.avatar} name={m.name} size="xs" />
+                  <Avatar
+                    src={m.avatar}
+                    name={m.name || m.id || 'Member'}
+                    size="xs"
+                  />
                   <span className="text-xs font-semibold text-navy-900 truncate">
-                    {m.name.split(' ')[0]}
+                    {String(m.name || m.id || 'Member').split(' ')[0]}
                   </span>
                 </button>
               );
