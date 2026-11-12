@@ -4,11 +4,13 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const paypalRoutes = require('./routes/paypal');
 require('dotenv').config();
+const receiptRoutes = require('./routes/receipt');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+app.use('/api', receiptRoutes);
 
 // ==========================================
 // 1. DATABASE CONNECTION
